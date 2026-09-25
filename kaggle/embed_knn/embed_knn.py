@@ -42,8 +42,8 @@ def embed(model, texts, chunk=1_000_000):
 
 
 @torch.no_grad()
-def topk(q: np.ndarray, p: np.ndarray, k: int, qb: int = 4096, pb: int = 2_000_000):
-    """Exact inner-product top-k of q against p, tiled so it fits a 16 GB T4."""
+def topk(q: np.ndarray, p: np.ndarray, k: int, qb: int = 4096, pb: int = 500_000):
+    """Exact inner-product top-k of q against p, tiled so it fits a 16 GB T4 (4096 x 500k fp16 block = 4 GB)."""
     P = [torch.from_numpy(p[i:i + pb]).cuda() for i in range(0, len(p), pb)]
     out_s, out_i = [], []
     for i in range(0, len(q), qb):

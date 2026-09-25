@@ -141,7 +141,7 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 |---|---|---|---|
 | 11.1 | French legal-form + address dictionaries | TODO | |
 | 11.2 | Country-agnostic feature audit | IN PROGRESS | **Crowding confirmed**: France S1 sharing its exact address with another S1 = 21.8% vs 7.8–10.4% US/IN; 4+ pool names at the address 29.5% vs 8.8–11.9%. v2 adds crowd features (`crowd_n_2`, `crowd_names_2`, `crowd_s1_n_1`, `crowd_pool_n_1`, `crowd_pool_names_1`, `a_sig_eq`) and a crowded-address val slice as the France proxy |
-| 11.3 | Manual review of a sample of French predictions | IN PROGRESS | Test France: fewer effectively-empty S1 (3.8% vs 5.4–5.5% US/IN); **address-only false merges** with unrelated names at the same address (e.g. "section gp" p=0.93 over the true "Clinique Sainte Marie SARL" at no. 12 with p=0.25); French true matches vary house numbers more |
+| 11.3 | Manual review of a sample of French predictions | IN PROGRESS | v2 LB drop shows France has **sibling businesses** (same core name + descriptor, same street, different house no.) as hard negatives; v1 France matches have house-no. conflicts in only 1.5% of pairs (US 9.8%, IN 19.5%). Probe p1 tests removing them |
 | 11.4 | Optional pseudo-labelling of high-confidence French pairs | TODO | |
 
 ## Step 12: Full-scale test inference & submissions
@@ -181,7 +181,8 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 |---|---|---|---|---|
 | v0 | 25 Sep 04:15 | Exact rule: name_key + house no. + state; candidates = matches | 0.6798 | **0.680** |
 | v1 | 25 Sep ~06:15 | LightGBM v1 (200k fit S1) + one-owner + thr 0.70 | 0.9706 (dev) | **0.962** |
-| v2 | 25 Sep ~08:20 (file ready) | + crowding / name-conflict / within-S1 name-rank features, thr 0.75 | 0.9710 (full val) | pending upload |
+| v2 | 25 Sep ~08:30 | + crowding / name-conflict / within-S1 name-rank features, thr 0.75 | 0.9710 (full val) | **0.951** ❌ (France ≈0.85: crowd features out-of-distribution; added 35k same-street, different-house-no. "sibling" merges) |
+| p1 | 25 Sep ~08:50 (file ready) | PROBE: v1 minus France pairs with conflicting house numbers (−13,974 pairs; US/IN identical to v1) | = v1 | pending upload |
 
 ## Decision log
 | Date | Decision | Why |
@@ -194,4 +195,5 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | 25 Sep | GPU work moves to Kaggle; AWS GPU appeal filed at a reduced size | AWS denied the G/VT quota for this new account |
 | 25 Sep | Stay on the AWS Free plan: S3 only; compute on laptop + Kaggle | User decision; avoids card billing beyond credits |
 | 25 Sep | Every portal submission = matching_results.tsv + code zip (`submissions/vN_code.zip`) | The portal form needs both files to enable Submit & Evaluate |
+| 25 Sep | Drop crowd features (France out-of-distribution); use LB probes that change ONLY France rows to test France hypotheses | v2 val +0.0007 but LB −0.011 |
 | 25 Sep | Treat France as a first-class target (country-agnostic features, French dictionaries, LOCO validation) | 15% of test S1, zero training labels |
