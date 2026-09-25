@@ -9,11 +9,11 @@
 | Challenge window | ends **~27 Sep 2026 23:50–24:00 IST** (portal countdown read 2d 20h 03m at ~03:50 IST 25 Sep) |
 | Internal freeze | **27 Sep 2026 21:00 IST** (final run, validate, zip, upload) |
 | Results / Finale | 2 Oct 2026 / 7 Oct 2026 (virtual) |
-| Best local F0.5 (val) | **0.9710 full val** (v2) |
-| Best public leaderboard F0.5 | **0.962** (v1 LightGBM) |
+| Best local F0.5 (val) | **0.9821 full val** (v5c = v4c refiner + blocking extension incl. Indian address codes) |
+| Best public leaderboard F0.5 | **0.962** (v1 LightGBM); v3 0.957 |
 | Blocking recall (val) / avg candidates per S1 | **95.79% / 54.5** (oracle F0.5 0.9855) |
 | AWS spend so far | $0 of $160 |
-| Current focus | v2 upload → v3: group consistency (stage 2) + 600k fresh fit S1 + Kaggle embedding kNN |
+| Current focus | Submit **v5c** at 26 Sep 00:00, read France from the LB, then France-only variants + final package. Submissions used 25 Sep: **5/5** (v3 0.957, one failed upload) |
 
 ## Approach at a glance
 Blocking (union of exact keys + rare tokens + TF-IDF char kNN + multilingual embedding kNN + reverse kNN) → **LightGBM pairwise matcher** on similarity features → optional multilingual cross-encoder re-ranker (MIT/Apache, ≤ 8B params) → decision layer (calibration, one-S1-per-record assignment, expected-F0.5 subset selection, singleton handling).
@@ -85,8 +85,8 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | 5.2 | Exact-key blocks (postcode + name token, house no. + street token) | DONE | Composite keys as tokens: `wl` name word|locality, `hs` house no.|street word, `hk` house no.|street skeleton, `nk` full name key |
 | 5.3 | Rare-token inverted index on names | DONE | IDF-weighted token overlap via joins (`src/blocking.py`); tokens with df > 3000 dropped. Name tokens: word, skeleton, word pairs, concatenation, 5-grams for domain names |
 | 5.4 | TF-IDF char n-gram kNN | SKIPPED | Replaced by the token-overlap scorer (sparse TF-IDF equivalent; 5-grams cover char-level concatenation). Revisit only if recall stalls |
-| 5.5 | Multilingual embedding kNN (FAISS) | TODO | Multilingual embedding kNN: needs GPU (EC2 quota pending / Kaggle). Target: the ~4% hard misses (typo + empty address, names replaced by titles) |
-| 5.6 | Reverse kNN (S2/S3 → S1) | TODO | Reverse competition features come from full-train candidates (Step 7.6), not a separate kNN |
+| 5.5 | Multilingual embedding kNN (FAISS) | DONE | Kaggle `amlc2026-embed-knn` (private; 2×T4, multilingual-e5-small MIT): top-6 neighbours per S1 per source. Val pair recall: blocking 95.79% → **union 96.67%** (US 97.78%, India 95.01%), +6.4 cands/S1. Union dirs `blocking/union_{train,test}` (hard links + `<country>_knn.parquet`) |
+| 5.6 | Reverse kNN (S2/S3 → S1) | SKIPPED | Covered by the across-S1 competition features (rev_*) computed over all candidates |
 | 5.7 | Union + dedupe; tune K for ≥ 98% pair recall | DONE | Full train (2.2M S1) in 68 min on the laptop → `artifacts/blocking/cands_all_df3000_t20n10a10/` (~121M pairs, 1.9 GB, integer ids). **Val (441k S1): pair recall 95.79% (US 96.8%, India 94.2%), entity full recall 87.4%, oracle F0.5 0.9855, 54.5 cands/S1**. The ordinal canonicalisation fix gave +0.1pp |
 | 5.8 | Optional cheap pre-ranker to cap candidates per S1 | TODO | |
 | 5.9 | Write `candidate_pairs.tsv` (final model input) | DONE | Test blocking 42 min: **93.2M pairs**. France 259k S1 → 52.4/S1, India 810k → 53.5, US 663k → 54.8. `artifacts/blocking/cands_test_df3000_t20n10a10/`. candidate_pairs.tsv is written from it at submission time |
@@ -104,10 +104,10 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | 7.1 | Name metrics: ratio, token set/sort, Jaro-Winkler, Jaccard, TF-IDF cosine, IDF-weighted overlap | DONE | Name fuzzy set (ratio / partial / token-sort / token-set / JW / concat), equality, Jaccard, length diffs. ~65k pairs/s on the laptop |
 | 7.2 | Phonetic & acronym match | DONE | Skeleton token-set, alias-vs-core, legal-form eq/Jaccard/missing, domain/indic flags |
 | 7.3 | Address component match (postcode, house no., street, city, state) | DONE | Address/street/locality similarity, state/house/postcode agreement (null = missing), number-set Jaccard/shared, empty flag |
-| 7.4 | Embedding cosines (name, address, combined) | TODO | |
+| 7.4 | Embedding cosines (name, address, combined) | DONE | `knn_cos`, `knn_rank` on union candidates; stage-1 val 0.9704 → 0.9720 with them |
 | 7.5 | Missingness flags; source flag (S2/S3) | DONE | Missing → null; `src` flag; country excluded |
 | 7.6 | Context: rank within S1, gap to best, reverse rank, #candidates | DONE | Within-S1 relative scores + across-S1 competition (rev_n_s1, rev_is_best, rev_margin, rev_score_rel, rev_name_rel) from ALL candidates of the split |
-| 7.7 | Group consistency: similarity to other strong candidates | IN PROGRESS | v2: `n_best` (max name sim), `n_conflict` flag, within-S1 name rank (`ctx_nbest_rel`, `ctx_is_best_name`, `ctx_name_rank`); chunks now follow S1 boundaries |
+| 7.7 | Group consistency: similarity to other strong candidates | DONE | **Stage-2 group consistency** (`src/stage2.py`): compare each candidate with the S1's 2 best other candidates (p1, name/skeleton/address/house agreement). Full val **0.9732** vs stage-1 0.9704 (+0.0028), P 0.9952, R 0.9347 |
 | 7.8 | Feature importance + leakage check | DONE | Gain v1: **rev_margin 0.66**, rev_is_best 0.10, a_nums_jacc 0.065, rev_score_rel 0.02, a_street_tset 0.02, a_tok_jacc 0.02. No label leakage: rev/ctx features use only blocking scores (label-free) |
 
 ## Step 8: Matching model
@@ -116,7 +116,7 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | 8.1 | Build training pairs from train-split candidates (hard negatives) | DONE | Train = candidates of 200k random fit S1 (10.9M pairs, all negatives kept); valid = dev 20k (1.09M pairs) |
 | 8.2 | LightGBM v1 | DONE | **LightGBM v1** (127 leaves, lr 0.08, 746 rounds, 4.7 min) + one-owner + thr 0.70: **dev F0.5 0.9706** (P 0.9937, R 0.9303; US 0.9752, India 0.9637; singleton acc 0.969). `artifacts/models/lgb_v1.txt` |
 | 8.3 | Hyperparameter tuning | DONE | v2 full val **0.9710** @thr 0.70/0.75 (US 0.9762, IN 0.9631; crowded slice 0.9702). Expected-F0.5 / hybrid / name floor all ≤0.9705, so plain threshold kept |
-| 8.4 | Probability calibration | TODO | |
+| 8.4 | Probability calibration | SKIPPED | LightGBM logloss probabilities are well-behaved; the threshold curve is flat 0.65–0.80 |
 | 8.5 | Leave-one-country-out robustness check | DONE | LOCO: US→India blind **0.9016** vs in-domain 0.9624 (−0.061); India→US blind 0.9623 vs 0.9756 (−0.013). Threshold re-tuning adds ≤0.01. The implied France score ≈0.93 exceeds the generic cost, pointing to the France-specific "several businesses at one address" false merges |
 
 ## Step 9: Decision layer / post-processing
@@ -131,7 +131,7 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 ## Step 10: Neural components & ensemble
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 10.1 | Compute embeddings on GPU (EC2 or Kaggle) | TODO | |
+| 10.1 | Compute embeddings on GPU (EC2 or Kaggle) | DONE | Embeddings on Kaggle GPU (24M texts, ~14 min per split on 2×T4); chunked fp16 + tiled exact top-k (fixes: __main__ guard, RAM OOM, GPU OOM) |
 | 10.2 | Cross-encoder fine-tune (stretch goal) | TODO | Only if ahead of schedule on Day 3 AM |
 | 10.3 | Blend / stack with LightGBM | TODO | |
 | 10.4 | Licence + parameter-count check | TODO | |
@@ -139,24 +139,24 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 ## Step 11: France generalisation
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 11.1 | French legal-form + address dictionaries | TODO | |
-| 11.2 | Country-agnostic feature audit | IN PROGRESS | **Crowding confirmed**: France S1 sharing its exact address with another S1 = 21.8% vs 7.8–10.4% US/IN; 4+ pool names at the address 29.5% vs 8.8–11.9%. v2 adds crowd features (`crowd_n_2`, `crowd_names_2`, `crowd_s1_n_1`, `crowd_pool_n_1`, `crowd_pool_names_1`, `a_sig_eq`) and a crowded-address val slice as the France proxy |
+| 11.1 | French legal-form + address dictionaries | DONE | French legal forms, street types, department→region map in `dictionaries.py` |
+| 11.2 | Country-agnostic feature audit | DONE | Crowd features were out-of-distribution for France (3× crowding) → **removed from v3** |
 | 11.3 | Manual review of a sample of French predictions | IN PROGRESS | v2 LB drop shows France has **sibling businesses** (same core name + descriptor, same street, different house no.) as hard negatives; v1 France matches have house-no. conflicts in only 1.5% of pairs (US 9.8%, IN 19.5%). Probe p1 tests removing them |
 | 11.4 | Optional pseudo-labelling of high-confidence French pairs | TODO | |
 
 ## Step 12: Full-scale test inference & submissions
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 12.1 | End-to-end run on EC2 | IN PROGRESS | v1: test features 93M pairs (~20 min, per country) + scoring 95 parts (22 min) on the laptop → 5.69M matched pairs, 5.9% S1 empty (France 4.8%, India 6.3%, US 5.8%; mean matches when non-empty 3.67/3.41/3.52 vs a true ~3.67) |
-| 12.2 | Validator PASS | DONE | v1 matching_results.tsv: **validator PASS (--check-ids)**. Code zip `submissions/v1_code.zip`. S3 backup `submissions/v1_lgb/` |
+| 12.1 | End-to-end run on EC2 | DONE | v3 test: union features 104M pairs → stage-2 → safeguard (rejected 185k French house-conflict pairs) → 5,679,374 pairs, 6.3% empty. France 7.0% empty / 3.42 per S1 (v1: 4.8% / 3.67); US/IN slightly more matches |
+| 12.2 | Validator PASS | DONE | v3 matching_results.tsv **validator PASS (--check-ids)**; `submissions/v3u/` (+ `v3u_code.zip`); fallback no-kNN v3 in `submissions/v3/` |
 | 12.3 | Submission log (see table below) | IN PROGRESS | v0 0.680, **v1 0.962** (dev 0.9706). Gap ≈ dev-threshold optimism + France: if US/IN ≈ 0.970 then France ≈ 0.91 → France is the biggest lever |
 
 ## Step 13: Error analysis & iteration
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 13.1 | False-positive review | TODO | |
-| 13.2 | False-negative review | TODO | |
-| 13.3 | Fixes + prioritised re-runs | TODO | |
+| 13.1 | False-positive review | DONE | Val FPs 7.4k pairs, 95% are distractors. Distractor recipe (all countries): S1 name + extra word / swapped word / legal form change, **house number shifted +1..+21 on the same street**. Distractors are one-offs (1.6% share name+house with another record vs 55% of true copies) and almost never have an empty address (0.3%). Test has 5.76 records/S1 vs 4.67 train → ~2x distractors per S1 on test (precision drops vs val) |
+| 13.2 | False-negative review | DONE | v3 val 0.9748: fix low-p in-candidate misses → 0.9834; remove all FPs → 0.9791; perfect within candidates → 0.9889. Half the low-p misses are empty-address records (97.7% of empty-address records are true matches; ambiguous when several S1 share the name). Blocking misses 50.9k (3.3%): many easy (same address + name typo) cut by the per-S1 top-k caps. No row-order / ID leaks. French house-number parse bug (postcodes '59200 Tourcoing', 'Appartement 406', '2eme etage') |
+| 13.3 | Fixes + prioritised re-runs | IN PROGRESS | v4 `src/refine.py` + `notebooks/run_v4.py`: stage-3 LightGBM on v3 features + p_v3 + house_v2 (postcode/apartment aware) delta/lev/substring + name-token miss/extra + copy-support counts; 2-fold on val. Next: address-anchored blocking extension (v5) |
 
 ## Step 14: Final package
 | # | Sub-step | Status | Notes |
@@ -182,7 +182,15 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | v0 | 25 Sep 04:15 | Exact rule: name_key + house no. + state; candidates = matches | 0.6798 | **0.680** |
 | v1 | 25 Sep ~06:15 | LightGBM v1 (200k fit S1) + one-owner + thr 0.70 | 0.9706 (dev) | **0.962** |
 | v2 | 25 Sep ~08:30 | + crowding / name-conflict / within-S1 name-rank features, thr 0.75 | 0.9710 (full val) | **0.951** ❌ (France ≈0.85: crowd features out-of-distribution; added 35k same-street, different-house-no. "sibling" merges) |
-| p1 | 25 Sep ~08:50 (file ready) | PROBE: v1 minus France pairs with conflicting house numbers (−13,974 pairs; US/IN identical to v1) | = v1 | pending upload |
+| p1 | — | PROBE (not submitted: user budget = 5/day, no probes) | = v1 | — |
+| v3 | 25 Sep 15:06 | stage-1 (no crowd, +knn_cos) + stage-2 group consistency + 600k fresh fit S1 + Kaggle neighbours (union candidates) + unseen-country house-number safeguard; thr 0.70 | **0.9748** (full val; no-kNN variant 0.9732) | **0.957** (0.956647) |
+| v4 | file ready (`submissions/v4`) | stage-3 refiner on v3 (house_v2 delta/lev/substring, name-token miss/extra, copy-support counts), 2-fold on val; no blanket France safeguard; thr 0.75 | 0.9773 (OOF full val) | — (fallback) |
+| v4b | discarded | + acronym + per-split token frequency | 0.9785 | ❌ not submitted: token-frequency values differed train vs test (27.32 vs 27.45) → tree thresholds flipped, dropped 46k India test pairs |
+| v4c | file ready (`submissions/v4c` + `v4c_code.zip`), **planned upload 26 Sep 00:00** | v4b with train-referenced, log2-bucketed token frequency | **0.9781** (OOF full val; US 0.9829, IN 0.9709) | pending |
+| v5 | file ready (`submissions/v5`) | v4c + blocking extension (house+street / name+street / house+name keys, top-3 per S1) scored by its own 2-fold LightGBM; ext thr 0.6 | 0.9798 (IN 0.9738) | — |
+| v6 | discarded | + name-only extension for unclaimed empty-address records | 0.9798 (no gain) | — |
+| v5b | file ready (`submissions/v5b`) | extension + Indian address-code keys (B-46, D-2/201 with state / locality) + exact name key + state, top-5 per S1 | 0.9819 (US 0.9840, IN 0.9787) | — (fallback) |
+| v5c | **file ready (`submissions/v5c` + `v5c_code.zip`) — planned upload 26 Sep 00:00** | v5b + rare adjacent address-word-pair key; main thr 0.75, ext thr 0.7; hashed per-country key builder (fits 16 GB) | **0.9821** (US 0.9842, IN 0.9789) | pending |
 
 ## Decision log
 | Date | Decision | Why |
@@ -196,4 +204,6 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | 25 Sep | Stay on the AWS Free plan: S3 only; compute on laptop + Kaggle | User decision; avoids card billing beyond credits |
 | 25 Sep | Every portal submission = matching_results.tsv + code zip (`submissions/vN_code.zip`) | The portal form needs both files to enable Submit & Evaluate |
 | 25 Sep | Drop crowd features (France out-of-distribution); use LB probes that change ONLY France rows to test France hypotheses | v2 val +0.0007 but LB −0.011 |
+| 25 Sep | No git commits by the assistant (user commits); max 5 submissions/day, no probes | User instruction |
+| 25 Sep | Unseen-country safeguard: reject house-number conflicts for countries absent from training | v2 regression + v1 France pattern (1.5% conflicts) |
 | 25 Sep | Treat France as a first-class target (country-agnostic features, French dictionaries, LOCO validation) | 15% of test S1, zero training labels |

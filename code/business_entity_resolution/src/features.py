@@ -207,8 +207,12 @@ def v2_features(df: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+KNN_COLS = ["knn_cos", "knn_rank"]
+
+
 def build(norm_dir: Path, split: str, cand_dir: Path, s1_nums: pl.Series | None, out_dir: Path,
-          gt: pl.DataFrame | None = None, chunk: int = 1_000_000, log=print) -> None:
+          gt: pl.DataFrame | None = None, chunk: int = 1_000_000, log=print, knn: pl.DataFrame | None = None) -> None:
+    """knn: optional (s1, m, src, knn_cos, knn_rank) from src.knn; adds embedding-similarity features (null if absent)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for old in out_dir.glob("*.parquet"):
         old.unlink()
@@ -234,12 +238,15 @@ def build(norm_dir: Path, split: str, cand_dir: Path, s1_nums: pl.Series | None,
                  .join(crowd_s1, on="s1", how="left"))
         if g is not None:
             cands = cands.join(g, on=["s1", "m", "src"], how="left").with_columns(pl.col("label").fill_null(0))
+        if knn is not None:
+            cands = cands.join(knn.select(["s1", "m", "src"] + KNN_COLS), on=["s1", "m", "src"], how="left")
         log(f"  {country}: {cands.height:,} pairs for {cands['s1'].n_unique():,} S1 ({time.time() - t0:.0f}s)")
         r1 = load_records(norm_dir, split, 1, cands["s1"].unique()).rename({c: c + "_1" for c in REC_COLS})
         r2 = pl.concat([load_records(norm_dir, split, i, cands.filter(pl.col("src") == i)["m"].unique()) for i in (2, 3)])
         r2 = r2.rename({c: c + "_2" for c in REC_COLS})
         cands = cands.sort("s1")
-        keep = ["s1", "m"] + BLOCK_COLS + CTX_COLS + CROWD_COLS + (["label"] if g is not None else [])
+        keep = (["s1", "m"] + BLOCK_COLS + CTX_COLS + CROWD_COLS + (KNN_COLS if knn is not None else [])
+                + (["label"] if g is not None else []))
         s1u = cands["s1"].unique(maintain_order=True)
         per = max(1, chunk * s1u.len() // cands.height)  # whole S1 groups per chunk
         done = 0
@@ -265,6 +272,7 @@ def main():
     ap.add_argument("--fit-sample", type=int, default=200_000)
     ap.add_argument("--gt", type=Path, default=Path("../../artifacts/processed/train_gt_pairs.parquet"))
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--knn", type=Path, default=None, help="knn_{split}.parquet from the Kaggle job")
     args = ap.parse_args()
     ids, gt = None, None
     if args.split == "train":
@@ -281,7 +289,11 @@ def main():
             sp = fit.filter(~pl.col("s1_id").is_in(used)).sample(args.fit_sample, seed=7)
         ids = sp["s1_id"].str.slice(3).cast(pl.UInt32)
         gt = pl.read_parquet(args.gt)
-    build(args.norm, args.split, args.cands, ids, args.out, gt)
+    knn = None
+    if args.knn:
+        from .knn import knn_table
+        knn = knn_table(args.knn)
+    build(args.norm, args.split, args.cands, ids, args.out, gt, knn=knn)
 
 
 if __name__ == "__main__":
