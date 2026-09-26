@@ -7,6 +7,7 @@ Inputs  features/{fit_sample,fit_sample2,dev,val,test}_{tag}
 Outputs models/lgb_s1_{tag}, models/lgb_v3_{tag}, features/*_s2{tag}, a val report, and (with --test)
         output/matching_results.tsv via src.predict (unseen-country safeguard on).
 """
+import os
 import argparse
 import json
 import subprocess
@@ -18,7 +19,7 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("AMLC_ROOT") or Path(__file__).resolve().parents[1])
 CODE = ROOT / "code" / "business_entity_resolution"
 sys.path.insert(0, str(CODE))
 from src.evaluate import evaluate  # noqa: E402

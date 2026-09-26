@@ -39,17 +39,29 @@ python -m src.features --split train --cands ../../artifacts/blocking/union_trai
     --knn ../../artifacts/kaggle_out/knn_train.parquet --out ../../artifacts/features/fit_sample2_u
 python -m src.features --split test --cands ../../artifacts/blocking/union_test \
     --knn ../../artifacts/kaggle_out/knn_test.parquet --out ../../artifacts/features/test_u
-# 8. Stage 1 + stage-2 group consistency + val report (see notebooks/run_v3.py)
-python ../../notebooks/run_v3.py --tag u --retrain-s1
-# 9. Test: group features -> stage-2 scores -> decision layer (unseen-country safeguard, one owner, thr 0.70)
-python -m src.stage2 --stage1 ../../artifacts/models/lgb_s1_u.txt --features ../../artifacts/features/test_u \
-    --split test --out ../../artifacts/features/test_s2u
-python -m src.predict --features ../../artifacts/features/test_s2u --model ../../artifacts/models/lgb_v3_u.txt \
-    --out ../../output --cands ../../artifacts/blocking/union_test --write-candidates
-# 10. Validate
-cd ../../student_resource && python utils/validate_submission.py --matching ../output/matching_results.tsv \
-    --candidate ../output/candidate_pairs.tsv --test-dir dataset/test
+# 8. Stage 1 + stage-2 group consistency, val report + v3 scores for val/test (pair universe of the refiner)
+python pipeline/run_v3.py --tag u --retrain-s1 --test        # -> models/lgb_{s1,v3}_u, test_scores_v3_u, val scores
+# 9. Extra out-of-sample refiner data: every fit S1 unseen by stage 1/2 (fit_sample3 = 440k, fit_sample4 = the rest)
+for n in 3 4; do python -m src.features --split train --cands ../../artifacts/blocking/union_train --subset fit_sample$n     --knn ../../artifacts/kaggle_out/knn_train.parquet --out ../../artifacts/features/fit_sample${n}_u
+  python pipeline/build_fit3.py --name $n; done                # -> refine/fit{3,4}_set.parquet
+# 10. Stage-3 sibling-aware refiner (src/refine.py): 5-fold on val + fit3/fit4 as extra training rows; scores test
+python pipeline/run_v4.py --tag v4f --folds 5 --extra refine/fit3_set.parquet refine/fit4_set.parquet --test
+# 11. Blocking extension (src/blockext.py: address-code / name / street keys) scored by its own 5-fold LightGBM
+python pipeline/run_v5.py --main-tag v4f --top 5 --folds 5 --test
+# 12. Cross-encoder (GPU, Kaggle 2xT4): export uncertain pairs, fine-tune xlm-roberta-base, score val/test
+python pipeline/ce_export.py                                  # -> artifacts/kaggle_ce/{train,val,test}.parquet (+ keys)
+#     upload the three parquet files as a Kaggle dataset and run kaggle/ce_kernel/ce_train.py (~1h40)
+#     download ce_val.parquet / ce_test.parquet into artifacts/kaggle_ce/
+# 13. Blend cross-encoder + refiner/extension probabilities (5-fold on val) -> blended test scores
+python pipeline/ce_blend.py --test                            # -> artifacts/test_scores_ce_{main,ext}.parquet
+# 14. Decision layer (one owner per record, thr 0.75 main / 0.70 extension, empty-S1 rescue 0.5) + validator
+python pipeline/make_submission.py --scores ../../artifacts/test_scores_ce_main.parquet     --ext ../../artifacts/test_scores_ce_ext.parquet --thr 0.75 --ext-thr 0.7 --empty-thr 0.5 --out ../../output
+python pipeline/write_candidates.py --out ../../output/candidate_pairs.tsv
+# 15. Validate
+cd ../../student_resource && python utils/validate_submission.py --matching ../output/matching_results.tsv     --candidate ../output/candidate_pairs.tsv --test-dir dataset/test --check-ids
 ```
+Scripts in `pipeline/` locate the data through the environment variable `AMLC_ROOT` (the folder that contains
+`student_resource/` and `artifacts/`): `set AMLC_ROOT=C:\path\to\repo` (Windows) or `export AMLC_ROOT=/path/to/repo`.
 (`src.baseline_rule` reproduces the v0 exact-rule baseline.)
 
 ## Modules (`src/`)
@@ -68,10 +80,17 @@ cd ../../student_resource && python utils/validate_submission.py --matching ../o
 | `train.py` | LightGBM training utilities, one-owner decision, threshold tuning |
 | `stage2.py` | Group consistency: compares each candidate with the S1's best other candidates (stage-1 probabilities) |
 | `decision.py` | Decision strategies (threshold, expected-F0.5); threshold won on validation |
-| `predict.py` | Test scoring + decision layer incl. the unseen-country house-number safeguard; writes both TSVs |
+| `predict.py` | v3-era test scoring + decision layer (kept for reproducing v3) |
+| `refine.py` | Stage-3 features: postcode/apartment-aware house number with delta/edit distance (siblings vs typos), typo-tolerant name-token substitution + log-frequency bucket of the swapped word, acronym match, copy-support counts |
+| `blockext.py` | Blocking extension: rare composite keys (house+street, name+street, house+name, Indian address code+state/locality, name key+state, adjacent address-word pairs), hashed and built per country |
 
-Model: two LightGBM binary classifiers (MIT licence, ~1k trees each). The embedding model `intfloat/multilingual-e5-small`
-(MIT, 118M parameters) is used only to retrieve candidates and compute a similarity feature.
+`pipeline/`: driver scripts (`run_v3/v4/v5.py`, `build_fit3.py`, `ce_export.py`, `ce_blend.py`, `make_submission.py`,
+`write_candidates.py`), plus `lbsim.py` (leaderboard simulator used for the French analysis).
+`kaggle/`: GPU jobs (`embed_knn` for candidate retrieval, `ce_kernel` for the cross-encoder).
+
+Models: a cascade of LightGBM binary classifiers (MIT licence) and a fine-tuned cross-encoder
+`xlm-roberta-base` (MIT, 278M parameters). `intfloat/multilingual-e5-small` (MIT, 118M) retrieves candidates and
+gives a similarity feature. All models are MIT-licensed and far below the 8B-parameter limit.
 
 Tests: `python -m pytest tests -q`
 

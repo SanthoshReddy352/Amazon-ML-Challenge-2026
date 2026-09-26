@@ -9,11 +9,11 @@
 | Challenge window | ends **~27 Sep 2026 23:50–24:00 IST** (portal countdown read 2d 20h 03m at ~03:50 IST 25 Sep) |
 | Internal freeze | **27 Sep 2026 21:00 IST** (final run, validate, zip, upload) |
 | Results / Finale | 2 Oct 2026 / 7 Oct 2026 (virtual) |
-| Best local F0.5 (val) | **0.9821 full val** (v5c = v4c refiner + blocking extension incl. Indian address codes) |
-| Best public leaderboard F0.5 | **0.962** (v1 LightGBM); v3 0.957 |
+| Best local F0.5 (val) | **0.98680 full val** (v9 = v5f + CE v1+v2 blend) |
+| Best public leaderboard F0.5 | **0.982244** (v9_ens12); v8 0.981889 |
 | Blocking recall (val) / avg candidates per S1 | **95.79% / 54.5** (oracle F0.5 0.9855) |
 | AWS spend so far | $0 of $160 |
-| Current focus | Submit **v5c** at 26 Sep 00:00, read France from the LB, then France-only variants + final package. Submissions used 25 Sep: **5/5** (v3 0.957, one failed upload) |
+| Current focus | 26 Sep slots: v5e2_usin (00:00) → probe_fr_empty → France experiments (frA–frE) / v5f. fit_sample4 (remaining ~525k fit S1) building for v5f. Submissions used 25 Sep: **5/5** (v3 0.957, one failed upload) |
 
 ## Approach at a glance
 Blocking (union of exact keys + rare tokens + TF-IDF char kNN + multilingual embedding kNN + reverse kNN) → **LightGBM pairwise matcher** on similarity features → optional multilingual cross-encoder re-ranker (MIT/Apache, ≤ 8B params) → decision layer (calibration, one-S1-per-record assignment, expected-F0.5 subset selection, singleton handling).
@@ -122,8 +122,8 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 ## Step 9: Decision layer / post-processing
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 9.1 | Global threshold sweep for F0.5 | TODO | |
-| 9.2 | One-S1-per-record assignment | TODO | Depends on 2.4 |
+| 9.1 | Global threshold sweep for F0.5 | DONE | Main 0.75 / extension 0.7; flat 0.65–0.80; with test-like 2× distractor FPs the optimum stays 0.75–0.80 |
+| 9.2 | One-S1-per-record assignment | DONE | `train.one_owner` over main + extension pairs jointly |
 | 9.3 | Expected-F0.5 subset selection per entity | DONE | Expected-F0.5 prefix selection tested: best 0.9705 (temp 1.5) < threshold 0.9710; the model is already sharp. Kept for documentation |
 | 9.4 | Singleton handling ("predict empty" option) | DONE | Singletons handled by threshold + one-owner (singleton acc 0.970 @0.75); expected-F empty option was worse (0.91–0.95) |
 | 9.5 | Ablation of each component | DONE | Ablation (val): threshold 0.9710 > expected-F 0.9705 > hybrid 0.9699 > +name floor 40/50/60 0.9689/0.9679/0.9666 |
@@ -132,16 +132,16 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
 | 10.1 | Compute embeddings on GPU (EC2 or Kaggle) | DONE | Embeddings on Kaggle GPU (24M texts, ~14 min per split on 2×T4); chunked fp16 + tiled exact top-k (fixes: __main__ guard, RAM OOM, GPU OOM) |
-| 10.2 | Cross-encoder fine-tune (stretch goal) | TODO | Only if ahead of schedule on Day 3 AM |
-| 10.3 | Blend / stack with LightGBM | TODO | |
-| 10.4 | Licence + parameter-count check | TODO | |
+| 10.2 | Cross-encoder fine-tune (stretch goal) | DONE (v1) / IN PROGRESS (v2) | v1: xlm-roberta-base on 930k fit3/fit4 pairs, 1 epoch, dev logloss 0.1435; uncertain-band AUC 0.943 (v5f) → 0.947 (CE) → **0.973 blended**; val F0.5 +0.0033. v2 (`amlc2026-cross-encoder2`): 1.58M pairs, wider band [0.01, 0.999), different seed → ensemble |
+| 10.3 | Blend / stack with LightGBM | DONE | `notebooks/ce_blend.py`: 5-fold by S1 on val band; richer blend (+17 pair features) only +0.00013 and uses France-shifted count features → kept the simple text-driven blend |
+| 10.4 | Licence + parameter-count check | DONE | xlm-roberta-base: MIT licence, 278M params (≤ 8B); multilingual-e5-small: MIT, 118M; LightGBM: MIT |
 
 ## Step 11: France generalisation
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
 | 11.1 | French legal-form + address dictionaries | DONE | French legal forms, street types, department→region map in `dictionaries.py` |
 | 11.2 | Country-agnostic feature audit | DONE | Crowd features were out-of-distribution for France (3× crowding) → **removed from v3** |
-| 11.3 | Manual review of a sample of French predictions | IN PROGRESS | v2 LB drop shows France has **sibling businesses** (same core name + descriptor, same street, different house no.) as hard negatives; v1 France matches have house-no. conflicts in only 1.5% of pairs (US 9.8%, IN 19.5%). Probe p1 tests removing them |
+| 11.3 | Manual review of a sample of French predictions | DONE | LB simulator (`notebooks/lbsim.py`, validated on val: reproduces set differences ±0.0003) fitted to v1/v2/v3/v5c/probe. French pairs where submissions disagree are roughly correctly handled (v1-only pairs ≈45% true); French house-conflict picks are mostly true copies (house corrupted, same name/street). France's 0.04 deficit sits in pairs all submissions share (common errors or blocking misses); French name_score is IDF-depressed (82 vs 105) |
 | 11.4 | Optional pseudo-labelling of high-confidence French pairs | TODO | |
 
 ## Step 12: Full-scale test inference & submissions
@@ -156,15 +156,18 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 |---|---|---|---|
 | 13.1 | False-positive review | DONE | Val FPs 7.4k pairs, 95% are distractors. Distractor recipe (all countries): S1 name + extra word / swapped word / legal form change, **house number shifted +1..+21 on the same street**. Distractors are one-offs (1.6% share name+house with another record vs 55% of true copies) and almost never have an empty address (0.3%). Test has 5.76 records/S1 vs 4.67 train → ~2x distractors per S1 on test (precision drops vs val) |
 | 13.2 | False-negative review | DONE | v3 val 0.9748: fix low-p in-candidate misses → 0.9834; remove all FPs → 0.9791; perfect within candidates → 0.9889. Half the low-p misses are empty-address records (97.7% of empty-address records are true matches; ambiguous when several S1 share the name). Blocking misses 50.9k (3.3%): many easy (same address + name typo) cut by the per-S1 top-k caps. No row-order / ID leaks. French house-number parse bug (postcodes '59200 Tourcoing', 'Appartement 406', '2eme etage') |
-| 13.3 | Fixes + prioritised re-runs | IN PROGRESS | v4 `src/refine.py` + `notebooks/run_v4.py`: stage-3 LightGBM on v3 features + p_v3 + house_v2 (postcode/apartment aware) delta/lev/substring + name-token miss/extra + copy-support counts; 2-fold on val. Next: address-anchored blocking extension (v5) |
+| 13.4 | Structural-pattern search (26 Sep, leader at 0.9905) | DONE | **No leaks**: IDs uniform/independent, raw TSV row order shuffled in train AND test (checked with v8 test preds). v8 val error split (fix-category-alone F0.5): empty-address non-exact-tie 25.2k missed (0.99176), empty-address identical-name ties 10.9k (0.98886, unresolvable: competing S1 have character-identical names; raw punctuation/legal form breaks only ~5k of 69k train ties; copy-count balancing ≈ chance), gibberish/translit names 8.5k (0.98837), house differs 5.9k (0.98804), other 3.7k, house missing 3.1k, domain 1.7k. Ceilings: perfect within candidates 0.99291; perfect on all non-empty + no FPs 0.99297; perfect except identical-name ties 0.99784. Record-first name assignment for unclaimed empty records: top-1 correct only 30% → every threshold lowers F0.5 (v6 idea stays dead). Gibberish misses: only 1.5k of 8.5k share an exact parsed street+locality with any S1 → needs fuzzy address blocking. Scripts in the session scratchpad (sep/cats/bound) |
+| 13.5 | v9 second blocking extension (`notebooks/run_v9.py`, outputs only in `artifacts/v9/`) | STOPPED (low ceiling) | New keys house\|locality, vowel-skeleton street\|locality, house\|street-skeleton + v5 keys at max_df 100, top-10 by name+addr ∪ top-10 by addr. Val: 5.47M new pairs (12.4/S1), 5,079 true (0.09%) = 22% of non-empty misses. **Perfect model on them: +0.00107 val**; exact-address slice only 2.3% precise → realistic ≈ +0.0003, not worth a test run + CE time. Of the 17.6k non-empty blocking misses, 7k share no key at all and 6.7k share only keys dropped by top-k |
+| 13.6 | France structural audit of v8 (unlabelled; per-class mix vs US/IN) | DONE (no actionable fix) | France per S1: v8 picks 3.32 (US 3.36), empty rows 5.6% (US 5.8%), pool 5.53 recs/S1 (US 5.76). Class mix differs but is explained by the DATA: same-house 3.02 vs US 2.39, house-differs 0.036 vs 0.28. France has few same-name/different-house candidates (0.057/S1 vs US 0.21), so these aren't missed copies. "All-new-name" excess (0.15 vs 0.08) = acronyms (AD, UF), gibberish rebrands, @handles/domains at the same house → true copies. Twins (same name+house+street) only 118 French S1. House parser OK on French formats (N°27, 86B, 34 Bis). Intrinsic: France has 1.7× more tied empty-address records (0.072 vs 0.042/S1, generic 'City + word' names). Validator allows one record under several S1 (not exploited: twins negligible) |
+| 13.3 | Fixes + prioritised re-runs | IN PROGRESS | v4c refiner, v5c extension (LB 0.97423), v5d 5-fold (val 0.9825). Refiner hyper-params flat; learning curve +0.00027 per +50% data → building 440k fresh fit S1 (fit_sample3) as extra refiner data. France: 29% of French S1 share a name with another S1 in the same city, 6.5% share name+house (US 0%); French predicted count distribution ≈ truth while US sits below → France error is mostly wrong records, not missing ones. Decomposition probe `submissions/probe_fr_empty` (France rows empty) measures US/IN exactly |
 
 ## Step 14: Final package
 | # | Sub-step | Status | Notes |
 |---|---|---|---|
-| 14.1 | `src/` cleanup + single `run_all` entry point | TODO | |
-| 14.2 | `README.md` (reproduce end-to-end) + pinned `requirements.txt` | TODO | |
-| 14.3 | Fill in `Documentation_template.md` | TODO | Write incrementally from Day 1 |
-| 14.4 | Zip structure check (`<team>_submission.zip`) | TODO | |
+| 14.1 | `src/` cleanup + single `run_all` entry point | DONE | Driver scripts shipped as `code/business_entity_resolution/pipeline/` (honour `AMLC_ROOT`), Kaggle jobs under `kaggle/`; README lists the 15 ordered commands |
+| 14.2 | `README.md` (reproduce end-to-end) + pinned `requirements.txt` | DONE | README rewritten for v8 (refiner, extension, cross-encoder, blend, decision, candidates, validation) |
+| 14.3 | Fill in `Documentation_template.md` | DONE (draft) | `docs/Documentation.md`; team member names to fill; update scores with the final submission |
+| 14.4 | Zip structure check (`<team>_submission.zip`) | IN PROGRESS | `artifacts/final/candidate_pairs.tsv` (110.9M pairs, 1.45 GB) validated with v8 (matches ⊆ candidates, PASS); final zip built once the last submission is chosen |
 | 14.5 | Final upload before 18:00 IST, 27 Sep | TODO | |
 
 ## Step 15: AWS cost control & teardown
@@ -190,7 +193,22 @@ Compute: laptop for EDA on samples; **AWS S3 + EC2** (r7i.8xlarge CPU, g5.2xlarg
 | v5 | file ready (`submissions/v5`) | v4c + blocking extension (house+street / name+street / house+name keys, top-3 per S1) scored by its own 2-fold LightGBM; ext thr 0.6 | 0.9798 (IN 0.9738) | — |
 | v6 | discarded | + name-only extension for unclaimed empty-address records | 0.9798 (no gain) | — |
 | v5b | file ready (`submissions/v5b`) | extension + Indian address-code keys (B-46, D-2/201 with state / locality) + exact name key + state, top-5 per S1 | 0.9819 (US 0.9840, IN 0.9787) | — (fallback) |
-| v5c | **file ready (`submissions/v5c` + `v5c_code.zip`) — planned upload 26 Sep 00:00** | v5b + rare adjacent address-word-pair key; main thr 0.75, ext thr 0.7; hashed per-country key builder (fits 16 GB) | **0.9821** (US 0.9842, IN 0.9789) | pending |
+| v5c | 25 Sep ~18:00 | v5b + rare adjacent address-word-pair key; main thr 0.75, ext thr 0.7; hashed per-country key builder (fits 16 GB) | **0.9821** (US 0.9842, IN 0.9789) | **0.97423** (implied France ≈0.94; US/IN ≈ val−0.001) |
+| probe_fr_empty | ready | v5c with every French row empty (US/IN rows identical to v5c) → LB = US/IN contribution + 0.15×French singleton rate; isolates France exactly | — | pending |
+| v5d | ready (`submissions/v5d`) | 5-fold refiner (v4d) + 5-fold extension model; thr 0.75/0.7 | **0.9825** (US 0.9845, IN 0.9794) | pending |
+| v5d_usin | ready (`submissions/v5d_usin`) | v5d for US/IN rows, v5c for French rows (France held at the known ≈0.94) | 0.9825 | pending |
+| v7 (joint pass) | tested | group-consistency pass over main+extension candidates | +0.00013 (0.98258) | not shipped (marginal); retest on v5f |
+| v5e | ready (`submissions/v5e`) | refiner trained on val folds + **fit_sample3 (440k fresh fit S1, 1.68M pairs)**, 5-fold; extension rebuilt on it | **0.9831** (US 0.9850, IN 0.9803) | pending |
+| v5e_usin | ready (`submissions/v5e_usin`) | v5e US/IN rows + v5c French rows | 0.9831 | pending (expected ≈0.9751) |
+| frA–frE | ready (`submissions/fr*`) | v5e with ONE French rule each: A drop contested picks (−7.5k), B French thr 0.9 (−14k), C French thr 0.6 (+11k), D drop French word-swaps p<0.99 (−22k), E add French word-swaps p≥0.4 (+5k) | = v5e | experiments |
+| v5e2_usin | 26 Sep 00:00 | v5e US/IN + empty-S1 rescue (p≥0.55) + v5c French rows | 0.9832 | **0.975111** (+0.00088 vs v5c = 84% of the val gain) |
+| probe_fr_empty | 26 Sep | v5c with French rows empty | — | **0.841588** → France(v5c) = 0.8857 + French singleton rate ≈ **0.94**; US/IN on test = val − 0.0013 |
+| v5f / v5f_usin | ready | refiner on val + fit3 + fit4 (all 1.0M unseen fit S1); extension on it; empty-S1 rescue | **0.9833** (US 0.9851, IN 0.9805) | — |
+| v7f / v7f_usin | ready | v5f + joint group-consistency pass (thr 0.7) | 0.98340 | fallback |
+| **v8** | **ready (`submissions/v8`) — recommended next upload** | v5f + **cross-encoder** (xlm-roberta-base, Kaggle) blended on the uncertain band (5-fold LightGBM on v5f logit + CE logit + 4 pair flags); thr 0.75/0.7 + empty rescue 0.5. France: CE vetoes 26.8k French pairs (mostly same-house word swaps) and France's per-S1 count distribution then matches US/India exactly | **0.98663** (US 0.9870, IN 0.9862) | **0.981889** (+0.00678: US/IN ≈+0.0028, France ≈+0.004 → France ≈0.967) |
+| v9_ens12 | 26 Sep ~16:40 | v8 + cross-encoder v2 (1.58M pairs, band [0.01, 0.999)) ensembled with v1 in the blend | 0.98680 | **0.982244** (+0.00036: US/IN ≈+0.00012, France ≈+0.0016) |
+| **v10** | **ready (`submissions/v10`) — tonight's last slot** | v9 + CE v2 scores for the 750k French pairs above the band (Kaggle `amlc2026-ce-fr-score`); blend vetoes 6,671 French picks (mostly unchecked same-address word swaps, CE veto 25%) and adds 177. Differs from v9 ONLY in 6,588 French rows | = v9 (0.98680) | pending (expected +0.0005–0.0009 if French vetoes are as accurate as before) |
+| mdeberta CE (v3) | running on Kaggle (ETA ~21:30) | microsoft/mdeberta-v3-base, 1.58M pairs; OOM fix applied | — | for 27 Sep |
 
 ## Decision log
 | Date | Decision | Why |

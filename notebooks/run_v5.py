@@ -7,6 +7,7 @@ Extension pairs have no blocking scores, so they get their own LightGBM: string 
 refiner features (src.refine), extension key stats, and context from the main model (is the record already
 confidently owned by another S1? how many matches does this S1 already have?).
 """
+import os
 import argparse
 import gc
 import json
@@ -18,7 +19,7 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("AMLC_ROOT") or Path(__file__).resolve().parents[1])
 sys.path.insert(0, str(ROOT / "code" / "business_entity_resolution"))
 from src.blockext import extension_pairs, load  # noqa: E402
 from src.evaluate import evaluate  # noqa: E402
@@ -33,6 +34,7 @@ log = lambda m: print(f"[{time.time()-t0:6.0f}s] {m}", flush=True)  # noqa: E731
 ap = argparse.ArgumentParser()
 ap.add_argument("--main-tag", default="v4b")
 ap.add_argument("--test", action="store_true")
+ap.add_argument("--folds", type=int, default=2)
 ap.add_argument("--top", type=int, default=3)
 a = ap.parse_args()
 num = lambda c: pl.col(c).str.slice(3).cast(pl.UInt32)  # noqa: E731
@@ -106,11 +108,11 @@ feats = [c for c in dv.columns if c not in ID and dv[c].dtype != pl.Utf8]
 log(f"val ext set {dv.height:,} pairs, pos {dv['y'].sum():,}, {len(feats)} features")
 X = dv.select([pl.col(c).cast(pl.Float32) for c in feats]).to_numpy()
 y = dv["y"].to_numpy()
-fold = (dv["s1"].hash(seed=3) % 2).to_numpy()
+fold = (dv["s1"].hash(seed=3) % a.folds).to_numpy()
 inner = (dv["s1"].hash(seed=9) % 10).to_numpy() == 0
 oof = np.zeros(dv.height, dtype=np.float32)
 models = []
-for k in (0, 1):
+for k in range(a.folds):
     fit, es = (fold != k) & ~inner, (fold != k) & inner
     b = lgb.train(PARAMS3, lgb.Dataset(X[fit], y[fit], feature_name=feats), 3000,
                   valid_sets=[lgb.Dataset(X[es], y[es])], callbacks=[lgb.early_stopping(150, verbose=False)])

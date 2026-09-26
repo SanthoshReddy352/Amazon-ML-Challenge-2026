@@ -1,0 +1,14 @@
+{
+  "id": "santhosh18x/amlc2026-cross-encoder3",
+  "title": "amlc2026-cross-encoder3",
+  "code_file": "ce_train.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "enable_internet": true,
+  "dataset_sources": ["santhosh18x/amlc2026-ce-pairs2"],
+  "competition_sources": [],
+  "kernel_sources": []
+}

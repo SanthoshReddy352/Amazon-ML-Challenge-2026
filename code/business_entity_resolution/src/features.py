@@ -268,7 +268,7 @@ def main():
     ap.add_argument("--split", choices=["train", "test"], required=True)
     ap.add_argument("--cands", type=Path, required=True)
     ap.add_argument("--split-file", type=Path, default=Path("../../artifacts/splits/split_v1.parquet"))
-    ap.add_argument("--subset", choices=["dev", "val", "fit_sample", "fit_sample2", "all"], default="dev")
+    ap.add_argument("--subset", choices=["dev", "val", "fit_sample", "fit_sample2", "fit_sample3", "fit_sample4", "all"], default="dev")
     ap.add_argument("--fit-sample", type=int, default=200_000)
     ap.add_argument("--gt", type=Path, default=Path("../../artifacts/processed/train_gt_pairs.parquet"))
     ap.add_argument("--out", type=Path, required=True)
@@ -287,6 +287,18 @@ def main():
             fit = sp.filter(pl.col("role") == "fit")
             used = fit.sample(200_000, seed=2026)["s1_id"].implode()
             sp = fit.filter(~pl.col("s1_id").is_in(used)).sample(args.fit_sample, seed=7)
+        elif args.subset == "fit_sample3":  # fresh fit S1 unseen by stage-1 AND stage-2 (training data for the refiner)
+            fit = sp.filter(pl.col("role") == "fit")
+            used = fit.sample(200_000, seed=2026)["s1_id"]
+            used2 = fit.filter(~pl.col("s1_id").is_in(used.implode())).sample(600_000, seed=7)["s1_id"]
+            sp = fit.filter(~pl.col("s1_id").is_in(pl.concat([used, used2]).implode())).sample(args.fit_sample, seed=11)
+        elif args.subset == "fit_sample4":  # every remaining fit S1 (unseen by stage-1/2, disjoint from fit_sample3)
+            fit = sp.filter(pl.col("role") == "fit")
+            used = fit.sample(200_000, seed=2026)["s1_id"]
+            used2 = fit.filter(~pl.col("s1_id").is_in(used.implode())).sample(600_000, seed=7)["s1_id"]
+            rest = fit.filter(~pl.col("s1_id").is_in(pl.concat([used, used2]).implode()))
+            used3 = rest.sample(440_000, seed=11)["s1_id"]
+            sp = rest.filter(~pl.col("s1_id").is_in(used3.implode()))
         ids = sp["s1_id"].str.slice(3).cast(pl.UInt32)
         gt = pl.read_parquet(args.gt)
     knn = None

@@ -6,6 +6,7 @@
 Inputs : artifacts/features/{val,test}_s2u (v3 feature rows), models/lgb_v3_u, artifacts/{val_scores_v3u,test_scores_v3_u}.parquet
 Outputs: artifacts/refine/*, models/lgb_v4_f{0,1}.txt, val report, test submission.
 """
+import os
 import argparse
 import json
 import sys
@@ -16,7 +17,7 @@ import lightgbm as lgb
 import numpy as np
 import polars as pl
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(os.environ.get("AMLC_ROOT") or Path(__file__).resolve().parents[1])
 CODE = ROOT / "code" / "business_entity_resolution"
 sys.path.insert(0, str(CODE))
 from src.evaluate import evaluate, write_id_list_tsv  # noqa: E402
@@ -32,6 +33,8 @@ log = lambda m: print(f"[{time.time()-t0:6.0f}s] {m}", flush=True)  # noqa: E731
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--test", action="store_true")
+ap.add_argument("--folds", type=int, default=2)
+ap.add_argument("--extra", nargs="*", default=[], help="extra always-in-training rows (e.g. refine/fit3_set.parquet)")
 ap.add_argument("--rebuild", action="store_true")
 ap.add_argument("--drop", nargs="*", default=[])
 ap.add_argument("--tag", default="v4")
@@ -71,23 +74,29 @@ def build_set(split, feat_dir, scores_path, out):
 val = build_set("train", A / "features/val_s2u", A / "val_scores_v3u.parquet", R / "val_set.parquet")
 feats = [c for c in v3_feats + ["p3"] + NEW_COLS if c not in a.drop]
 X = lambda d: d.select([pl.col(c).cast(pl.Float32) for c in feats]).to_numpy()  # noqa: E731
-fold = (val["s1"].hash(seed=3) % 2).to_numpy()
+fold = (val["s1"].hash(seed=3) % a.folds).to_numpy()
 y = val["label"].to_numpy()
 oof = np.zeros(val.height, dtype=np.float32)
 models = []
-for k in (0, 1):
+Xa = X(val)
+Xe = ye = None
+if a.extra:
+    ex = pl.concat([pl.read_parquet(A / e) for e in a.extra], how="vertical_relaxed")
+    Xe, ye = X(ex), ex["label"].to_numpy()
+    log(f"extra training rows: {ex.height:,} (pos {int(ye.sum()):,})")
+    del ex
+for k in range(a.folds):
     tr, te = fold != k, fold == k
     # inner early-stopping split inside the training fold
     inner = (val["s1"].hash(seed=9) % 10).to_numpy() == 0
     fit, es = tr & ~inner, tr & inner
-    Xa = X(val)
-    b = lgb.train(PARAMS3, lgb.Dataset(Xa[fit], y[fit], feature_name=feats), 4000,
+    Xf, yf = (Xa[fit], y[fit]) if Xe is None else (np.vstack([Xa[fit], Xe]), np.concatenate([y[fit], ye]))
+    b = lgb.train(PARAMS3, lgb.Dataset(Xf, yf, feature_name=feats), 4000,
                   valid_sets=[lgb.Dataset(Xa[es], y[es])], callbacks=[lgb.early_stopping(150, verbose=False)])
     oof[te] = b.predict(Xa[te], num_iteration=b.best_iteration)
     b.save_model(str(A / f"models/lgb_{a.tag}_f{k}.txt"), num_iteration=b.best_iteration)
     models.append(b)
     log(f"fold {k}: {b.best_iteration} rounds")
-    del Xa
 imp = sorted(zip(feats, models[0].feature_importance("gain")), key=lambda x: -x[1])
 tot = sum(g for _, g in imp)
 log("top gain: " + ", ".join(f"{f} {g/tot:.3f}" for f, g in imp[:25]))
