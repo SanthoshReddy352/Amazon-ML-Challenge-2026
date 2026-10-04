@@ -2,6 +2,7 @@
 student_resource/dataset/
 __MACOSX/
 artifacts/*
+!artifacts/experiments.jsonl
 !artifacts/.gitkeep
 output/*.tsv
 *.parquet
