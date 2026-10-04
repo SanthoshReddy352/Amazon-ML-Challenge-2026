@@ -1,24 +1,36 @@
 # ML Challenge 2026: Business Entity Resolution Solution Template
 
 **Team Name:** Team Bloom
-**Team Members:** G Santhosh Reddy, [member 2], [member 3]
+**Team Members:** G Santhosh Reddy, Pulipaka Sanjana, Krishnavamsi Manukinda
 **Submission Date:** 27 September 2026
 
 ---
 
 ## 1. Executive Summary
 We resolve Source 2 and Source 3 records to Source 1 entities in four stages:
-1. **Country-partitioned, multi-key blocking**, plus multilingual embedding neighbours and an address-code extension.
+1. **Country-partitioned, multi-key blocking** in both directions:
+   - S1-centric: each S1 keeps its best records.
+   - Record-centric reverse blocking: each S2/S3 record keeps its best S1.
+   - Also: multilingual embedding neighbours, an address-code extension, and a **bi-encoder retriever fine-tuned on our own training pairs** (multilingual-e5-small, exact top-k in both directions).
 2. **A cascade of LightGBM matchers** over ~120 name, address, competition and group-consistency features.
-3. **A multilingual cross-encoder** (xlm-roberta-base, MIT licence) fine-tuned on uncertain pairs and blended into the LightGBM probability.
-4. **A decision layer** tuned for macro F0.5: one owner per record, thresholds, and a rescue step for S1 that would otherwise be empty.
+3. **An ensemble of multilingual cross-encoders**, fine-tuned on uncertain pairs and blended into the LightGBM probability:
+   - two xlm-roberta-base models (MIT licence);
+   - mdeberta-v3-base models (MIT licence).
+4. **A band re-scorer**: a LightGBM that re-scores every uncertain pair using the bi-encoder's view of the whole country (is this S1 the record's nearest S1? how far is the runner-up?), name-tie counts, copy support and the raw cross-encoder logits.
+5. **A decision layer** tuned for macro F0.5:
+   - one owner per record and thresholds;
+   - a rescue step for S1 that would otherwise be empty;
+   - a record-level model that resolves empty-address records between S1 that share a name.
 
 The key innovations are:
 - **Sibling-aware features** that separate the generator's hard negatives (same street, house number shifted by +1…+21, one name word changed) from true copies.
 - **Blocking keys built on Indian address codes.**
-- **The cross-encoder**, which fixed most of the French (unseen country) false merges.
+- **The cross-encoders**, which fixed most of the French (unseen country) false merges.
+- **Record-centric reverse blocking**: it recovers copies that the S1-centric caps push out of the candidate lists.
+- **Tie-aware empty-address resolution.**
+- **A fine-tuned bi-encoder used twice**: as a retriever for the copies that every lexical key missed (hard positives mined from our own blocking misses), and as global context for re-scoring uncertain pairs.
 
-Validation macro F0.5 is **0.9866** (US 0.9870, India 0.9862); the public leaderboard score is **0.9819**.
+Validation macro F0.5 is **0.99109** (US 0.99068, India 0.99170) for the final pipeline (v17); its public leaderboard score is **0.987408** (our best; v15 scored 0.986685).
 
 ---
 
@@ -71,7 +83,20 @@ Blocking is partitioned by country; `country` is treated as an open set.
 
   New pairs are ranked by a cheap name + address similarity, the top 5 per S1 are kept, and the pairs are scored by a dedicated model.
 
-**Candidate pairs generated:** test = 103,968,895 (blocking + embedding neighbours) + 6,942,258 (extension) ≈ **110.9M pairs** (~64 per S1). The full set is written to `output/candidate_pairs.tsv`.
+- **Record-centric reverse blocking** (`src/revblock.py`, "ext2"):
+  - **Why it is needed.** The S1-centric caps drop a typo'd or rebranded copy whenever its S1 has many exact-name records elsewhere, even though the copy's own best S1 is the right one. On validation, 3.1% of true pairs never reached the matcher.
+  - **How it works.** Every S2/S3 record queries an index of the S1 of its country, using the same typed tokens with IDF over S1 and max_df 300. It keeps its top 3 S1 overall, plus the top 1 by name and the top 1 by address. Records with an empty address keep their top 10.
+  - **Features.** The record's best and second-best S1 score over *all* S1 are kept as features: relative score and the gap between the top two.
+  - **Scoring.** New pairs get their own 77-feature LightGBM (5-fold out-of-fold on validation, AUC 0.997), then the cross-encoder blend.
+  - **Result.** On validation: 3.09M new pairs, containing 8.3k true pairs (26% of the remaining blocking misses). On test: 15.3M new pairs.
+
+- **Embedding retrieval over records** (ext3, `kaggle/embed_rknn`): every S2/S3 record's top-5 S1 by zero-shot multilingual-e5 cosine on "name, city". 6.0M new validation pairs but only 1.6k true (+0.00017).
+- **Fine-tuned bi-encoder retriever** (ext4, `kaggle/biencoder`):
+  - multilingual-e5-small fine-tuned on 1.2M (S1, copy) pairs from fit S1 only, including all 203k fit pairs our candidate generation missed (hard positives), with the strongest competing S1 as a hard negative. Text "name | address"; symmetric InfoNCE (τ 0.05).
+  - Exact top-5 in both directions (record → S1 and S1 → record) per country.
+  - Validation: 7.04M new pairs with 13.6k true (≈55% of the remaining blocking misses); own 72-feature LightGBM + the 4-encoder blend + tie guard: **+0.0016**.
+
+**Candidate pairs generated:** test ≈ **191.9M pairs** (~111 per S1): blocking + embedding neighbours 104.0M, extension 6.9M, ext2 15.3M, ext3/ext4 embedding neighbours. The full set is written to `output/candidate_pairs.tsv`.
 
 **How you ensured true matches were not lost**
 - Recall was measured on the validation S1 against the *full* pool:
@@ -107,10 +132,30 @@ Blocking is partitioned by country; `country` is treated as an open set.
 
 The cross-encoder lifts ranking quality (AUC) on the uncertain pairs from 0.943 to 0.973.
 
+- **Empty-address rescue** (`notebooks/empty_rescue.py`):
+  - **The problem.** 97.7% of empty-address records are true copies, yet 53% of them were missed. Mostly these are name ties: several S1 share the record's name, and the pair model splits its probability between them.
+  - **The model.** A record-level LightGBM decides whether an unclaimed empty-address record goes to its top S1.
+  - **Tie-break evidence.** It uses the final pair probability and evidence counted over **all** S1 of the country:
+    - how many S1 share the record's name key;
+    - how many share the key plus the record's legal form;
+    - how many share the exact normalised name;
+    - whether the top S1 shares the legal form or the normalised name.
+  - **Result.** It accepts at q ≥ 0.75 (about 90% precise on out-of-fold validation).
+- **Tie guard.** A cross-encoder sees one pair, not the other S1 that carry the same name. The ext2 blend was trained on a band that contains almost no tied empty-address records, yet on test it upgraded 2.9k French ones whose name is shared by 4+ S1. For empty-address records with a tied name key, ext2 therefore keeps the tie-aware LightGBM probability.
+
+- **Band re-scorer** (`notebooks/band_stack.py`, v16):
+  - **Scope.** Every pair of every kind whose final probability is in [0.01, 0.995) (validation 236k pairs, test 968k). Main/extension pairs with refiner p ≥ 0.999 were never cross-encoder-blended on validation; on test these are France's above-band pairs, so they are left unchanged.
+  - **Features (49).** The final probability and kind; the fine-tuned bi-encoder's neighbour context over **all** S1 of the country (rank and cosine of the pair in the record → S1 and S1 → record top-k lists, best/2nd/5th cosines, gaps, "is the record's nearest S1"); the zero-shot e5 reverse neighbours; name-key tie counts over all S1; the 4 raw cross-encoder logits; address-equality flags; the S1's confident copies (pf ≥ 0.9) with how many share the record's name key, house number or address key; and the record's competing S1 (sum, max and count of the other S1's probabilities, whether this S1 is the record's best).
+  - **Stability.** Only features that behave the same on validation and test are used. Competition over the *candidate* frame is left out, because on validation it only sees validation S1.
+  - **Result.** 5-fold out-of-fold on validation: band AUC 0.914 → 0.930, F0.5 0.99016 → **0.99109** with the decision below. The bi-encoder context gives most of it (+0.00046).
+
 **Threshold selection method**
 - One owner per record (each S2/S3 record is kept only for its highest-probability S1).
+- **Record-normalised decision** (v16c). A record has one owner, but pairs are scored independently, so a record wanted by several S1 gets a confident winner even when the runner-up is just as likely: on validation, contested winners at p 0.75–0.9 are true only 45%. The threshold and the empty-S1 rescue therefore use p' = p / max(1, sum of the record's p over all its S1). Validation understates this problem, because validation candidates contain only validation S1 (20% of S1). On test, contested winners at p ≥ 0.75 per 1k S1 are 2.2 (US), 4.0 (India) and 15.9 (France: generic names such as an address-less "Calais Loisirs" against 14 "Calais Loisirs …" S1), versus 0.8–1.2 on validation. Validation 0.99098 → 0.99105; kept on top of the contest-aware re-scorer (v17) as a guard for the many-way French ties.
 - Thresholds 0.75 (main) and 0.70 (extension), chosen by macro F0.5 on out-of-fold validation. They were stress-tested with distractor false positives doubled to mimic the test density, where the optimum stays at 0.75–0.80.
 - S1 that would be empty get their best candidate if p ≥ 0.5.
+- ext2 pairs use threshold 0.75; the result is flat between 0.70 and 0.85.
+- Expected-F0.5 subset selection per S1 was re-tested on the calibrated ensemble (and again, by Monte Carlo, on v16b). It gives the threshold rule's score (0.98703; 0.99099 vs 0.99098), so the simpler rule is kept. Calibration is exact on validation: 1,799 expected vs 1,806 actual false-positive pairs.
 
 ---
 
@@ -123,9 +168,17 @@ The cross-encoder lifts ranking quality (AUC) on the uncertain pairs from 0.943 
   | Rule baseline | 0.680 | 0.680 |
   | LightGBM v1 | 0.970 | 0.962 |
   | Refiner + extension (v5c) | 0.9821 | 0.9742 |
-  | Plus the cross-encoder (v8) | **0.9866** | **0.9819** |
+  | Plus the cross-encoder (v8) | 0.9866 | 0.9819 |
+  | 3–4 cross-encoders (v11) | 0.98703 | 0.983363 |
+  | + reverse blocking + empty-address rescue (v13b) | 0.98836 | 0.984715 |
+  | + bi-encoder retrieval (v15) | 0.99016 | 0.986685 |
+  | + band re-scorer (v16b) | 0.99098 | — |
+  | + record-normalised decision (v16c) | 0.99105 | — |
+  | + contest features in the re-scorer (v17, final) | **0.99109** | **0.987408** |
 
-  US/India on test land ~0.0013 below validation. France, which has no labels, was estimated by decomposing leaderboard scores: ≈0.94 before the cross-encoder, ≈0.97 after.
+  US/India on test land ~0.0013 below validation. France, which has no labels, was estimated by decomposing leaderboard scores: ≈0.94 before the cross-encoder, ≈0.97 after, ≈0.975 with v15.
+- **Remaining validation loss (v16b, gain if each class were fixed alone):** identical-name empty-address ties 14.4k pairs (+0.0029, unresolvable from the data), blocking misses 11.3k (+0.0023), empty-address low-probability 7.8k (+0.0017), false positives 2.1k (+0.0013), non-empty low-probability 5.2k (+0.0011).
+- A simulation of the test's ~1.9× distractor density on validation (cloning distractor records) costs only 0.00013 and never favours higher thresholds, so thresholds were left at their validation optimum.
 - **Common false positives (wrong merges):**
   - Generator siblings: the same street and the name plus one word, with the house number shifted.
   - Identical names at adjacent house numbers.
@@ -157,11 +210,11 @@ The main lesson: with an unseen country, audit every feature for distribution sh
   - `train.py`: LightGBM training and one-owner assignment.
   - `evaluate.py`: exact macro F0.5 and blocking metrics.
   - `predict.py`: submission writing.
-- Driver scripts (`code/notebooks/`): `run_v3.py` (stage 1–2), `build_fit3.py` (extra refiner data), `run_v4.py` (refiner), `run_v5.py` (extension), `ce_export.py` + `code/kaggle/ce_kernel/ce_train.py` (cross-encoder on Kaggle), `ce_blend.py` / `ce_blend2.py` (blend), `make_submission.py` (decision layer + validator).
+- Driver scripts (`code/business_entity_resolution/pipeline/`, Kaggle jobs under `kaggle/`): `run_ext2_block.py` / `run_ext2.py` / `ext2_blend.py` (reverse blocking), `run_ext3.py` + `kaggle/embed_rknn`, `kaggle/biencoder` (ext3/ext4), `final_v13.py` (decision layer), `band_stack.py` (v16 re-scorer, final output). Earlier drivers: `run_v3.py` (stage 1–2), `build_fit3.py` (extra refiner data), `run_v4.py` (refiner), `run_v5.py` (extension), `ce_export.py` + `code/kaggle/ce_kernel/ce_train.py` (cross-encoder on Kaggle), `ce_blend.py` / `ce_blend2.py` (blend), `make_submission.py` (decision layer + validator).
 - The README gives the exact order and commands to regenerate `output/matching_results.tsv` and `output/candidate_pairs.tsv`.
 
 ### B. Additional Results
-- **Model licences:** multilingual-e5-small (MIT, 118M parameters), xlm-roberta-base (MIT, 278M), LightGBM (MIT). All are within ≤ 8B parameters.
+- **Model licences:** multilingual-e5-small (MIT, 118M parameters; also fine-tuned as the bi-encoder), xlm-roberta-base (MIT, 278M), mdeberta-v3-base (MIT, 278M), LightGBM (MIT). All are within ≤ 8B parameters.
 - **Data:** no external data, lookups or geocoding. Every map (transliteration, state and department tables) is derived from the training data or is a static dictionary shipped in `src/dictionaries.py`.
 - **Ablation (validation F0.5):**
 
@@ -173,3 +226,14 @@ The main lesson: with an unseen country, audit every feature for distribution sh
   | + Indian address codes | 0.9821 |
   | + 1M extra unseen training S1 | 0.9833 |
   | + cross-encoder blend | 0.9866 |
+  | + 2nd xlm-r + mdeberta cross-encoders (v11) | 0.98703 |
+  | + record-centric reverse blocking (ext2) | 0.98792 |
+  | + empty-address rescue (v13) | 0.98824 |
+  | + 4th cross-encoder (CE4, mdeberta 2 epochs) | 0.98836 |
+  | + zero-shot e5 record neighbours (ext3) | 0.98853 |
+  | + fine-tuned bi-encoder retrieval (ext4, v15) | 0.99016 |
+  | + band re-scorer: bi-encoder context, ties, raw CE logits (v16) | 0.99077 |
+  | + address equality and copy support in the re-scorer (v16b) | 0.99098 |
+  | + record-normalised one-owner decision (v16c) | 0.99105 |
+  | + the record's competing S1 probabilities as re-scorer features (v17) | 0.99109 |
+  | (tested, not kept) bi-encoder S1 → record top-15 retrieval (ext5): 2.16M new pairs, 4.5k true, no gain | 0.99099 |

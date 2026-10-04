@@ -23,7 +23,8 @@ from src.evaluate import evaluate  # noqa: E402
 from src.train import one_owner, to_pairs  # noqa: E402
 
 A, R = ROOT / "artifacts", ROOT / "artifacts" / "refine"
-SRC = {"ce1": (A / "kaggle_ce", "ce_{s}.parquet"), "ce2": (A / "kaggle_ce2", "ce2_{s}.parquet"), "ce3": (A / "kaggle_ce2", "ce3_{s}.parquet")}
+SRC = {"ce1": (A / "kaggle_ce", "ce_{s}.parquet"), "ce2": (A / "kaggle_ce2", "ce2_{s}.parquet"), "ce3": (A / "kaggle_ce2", "ce3_{s}.parquet"),
+       "ce4": (A / "kaggle_ce2", "ce4_{s}.parquet")}
 ap = argparse.ArgumentParser()
 ap.add_argument("--ce", nargs="+", default=["ce1"])
 ap.add_argument("--test", action="store_true")

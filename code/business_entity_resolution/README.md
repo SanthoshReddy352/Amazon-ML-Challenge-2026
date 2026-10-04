@@ -48,16 +48,39 @@ for n in 3 4; do python -m src.features --split train --cands ../../artifacts/bl
 python pipeline/run_v4.py --tag v4f --folds 5 --extra refine/fit3_set.parquet refine/fit4_set.parquet --test
 # 11. Blocking extension (src/blockext.py: address-code / name / street keys) scored by its own 5-fold LightGBM
 python pipeline/run_v5.py --main-tag v4f --top 5 --folds 5 --test
-# 12. Cross-encoder (GPU, Kaggle 2xT4): export uncertain pairs, fine-tune xlm-roberta-base, score val/test
-python pipeline/ce_export.py                                  # -> artifacts/kaggle_ce/{train,val,test}.parquet (+ keys)
-#     upload the three parquet files as a Kaggle dataset and run kaggle/ce_kernel/ce_train.py (~1h40)
-#     download ce_val.parquet / ce_test.parquet into artifacts/kaggle_ce/
-# 13. Blend cross-encoder + refiner/extension probabilities (5-fold on val) -> blended test scores
-python pipeline/ce_blend.py --test                            # -> artifacts/test_scores_ce_{main,ext}.parquet
-# 14. Decision layer (one owner per record, thr 0.75 main / 0.70 extension, empty-S1 rescue 0.5) + validator
-python pipeline/make_submission.py --scores ../../artifacts/test_scores_ce_main.parquet     --ext ../../artifacts/test_scores_ce_ext.parquet --thr 0.75 --ext-thr 0.7 --empty-thr 0.5 --out ../../output
-python pipeline/write_candidates.py --out ../../output/candidate_pairs.tsv
-# 15. Validate
+# 12. Cross-encoders (GPU, Kaggle 2xT4). Export the uncertain pairs, fine-tune, then score val/test:
+python pipeline/ce_export.py                                  # CE v1 -> artifacts/kaggle_ce/{train,val,test}.parquet (+ keys)
+python pipeline/ce_export2.py                                 # CE v2+ (wider band) -> artifacts/kaggle_ce2/
+#     kaggle/ce_kernel (xlm-roberta-base v1), ce_kernel2 (xlm-roberta-base v2), ce_kernel3 (mdeberta-v3-base),
+#     ce_kernel4 (mdeberta-v3-base, 2 epochs, new seed); download their ce_{val,test}.parquet to
+#     artifacts/kaggle_ce/ce_*.parquet and artifacts/kaggle_ce2/ce{2,3,4}_*.parquet
+# 13. Blend the encoders with the refiner/extension probabilities (5-fold on val)
+python pipeline/ce_blend2.py --ce ce1 ce2 ce3 ce4 --tag ens1234 --test   # -> artifacts/test_scores_ens1234_{main,ext}.parquet
+#     French pairs above the band keep v10's blended p (kaggle/ce_fr_kernel + ce_blend2 --fr-extra, tag ens12fr)
+# 14. ext2: record-centric reverse blocking (src/revblock.py), its own LightGBM, then the CE blend with a tie guard
+python pipeline/run_ext2_block.py train && python pipeline/run_ext2_block.py test     # ~40 min each
+python pipeline/run_ext2.py && python pipeline/run_ext2.py --test --reuse-models      # -> artifacts/test_scores_ext2.parquet
+python pipeline/ce_export_ext2.py val     # upload kaggle/ce_ext2_upload, run kaggle/ce_ext2_kernel -> artifacts/kaggle_ext2/out_val/
+python pipeline/ce_export_ext2.py test    # same for test -> artifacts/kaggle_ext2/out_test/
+python pipeline/ext2_blend.py --test      # -> artifacts/test_scores_ext2b.parquet
+# 15. Embedding neighbours as extra pair sets (scored like ext2: own LightGBM, 4-CE blend, tie guard)
+#     ext3: zero-shot e5 record -> S1 top-5 (kaggle/embed_rknn -> artifacts/kaggle_rknn/)
+python pipeline/run_ext3.py && python pipeline/run_ext3.py --test --reuse-models
+#     ext4: fine-tuned bi-encoder (kaggle/biencoder: trained on fit pairs incl. our blocking misses; both directions top-5)
+python pipeline/biencoder_export.py      # -> kaggle/biencoder_upload (dataset amlc2026-text2), run kaggle/biencoder -> artifacts/kaggle_bknn/
+python pipeline/run_ext3.py --source bknn --tag f && python pipeline/run_ext3.py --source bknn --tag f --test --reuse-models
+#     (then ce_export_ext2.py / ext2_blend.py with the e and f tags, as for ext2)
+# 16. Decision layer v13 (one owner per record, thr 0.75 main / 0.70 extension / 0.75 ext2-ext4, empty-S1 rescue 0.5,
+#     empty-address rescue model q >= 0.75) -> v15; kept for reference
+python pipeline/final_v13.py --blend ens1234 --ext-tags e f --test --fr-ext2 --fr-empty --out ../../submissions/v15
+# 17. FINAL: band re-scorer over every uncertain pair (bi-encoder neighbour context, name ties, CE logits, address /
+#     copy support, the record's competing S1), then the decision layer with record-normalised probabilities (p / max(1, sum over the record's S1));
+#     writes matching_results.tsv + runs the validator
+python pipeline/band_stack.py --addr --contest --norm 1.0 --test --out ../../output
+#     last-slot variant (27 Sep): v17's decision with French thresholds -0.10 (France recall), US/India unchanged
+python pipeline/probe_frame.py && python pipeline/probe_make.py --name p2_fr_down --fr-shift -0.10
+python pipeline/write_candidates.py --ext2 "" e f --out ../../output/candidate_pairs.tsv
+# 18. Validate
 cd ../../student_resource && python utils/validate_submission.py --matching ../output/matching_results.tsv     --candidate ../output/candidate_pairs.tsv --test-dir dataset/test --check-ids
 ```
 Scripts in `pipeline/` locate the data through the environment variable `AMLC_ROOT` (the folder that contains
@@ -82,14 +105,20 @@ Scripts in `pipeline/` locate the data through the environment variable `AMLC_RO
 | `decision.py` | Decision strategies (threshold, expected-F0.5); threshold won on validation |
 | `predict.py` | v3-era test scoring + decision layer (kept for reproducing v3) |
 | `refine.py` | Stage-3 features: postcode/apartment-aware house number with delta/edit distance (siblings vs typos), typo-tolerant name-token substitution + log-frequency bucket of the swapped word, acronym match, copy-support counts |
+| `revblock.py` | Record-centric reverse blocking: each S2/S3 record queries an S1 index of its country and keeps its top-3 S1 overall, the top-1 by name and the top-1 by address (top-10 for empty-address records). Recovers copies crowded out of the S1-centric lists |
 | `blockext.py` | Blocking extension: rare composite keys (house+street, name+street, house+name, Indian address code+state/locality, name key+state, adjacent address-word pairs), hashed and built per country |
 
 `pipeline/`: driver scripts (`run_v3/v4/v5.py`, `build_fit3.py`, `ce_export.py`, `ce_blend.py`, `make_submission.py`,
 `write_candidates.py`), plus `lbsim.py` (leaderboard simulator used for the French analysis).
-`kaggle/`: GPU jobs (`embed_knn` for candidate retrieval, `ce_kernel` for the cross-encoder).
+`kaggle/`: GPU jobs:
+- `embed_knn`: candidate retrieval.
+- `ce_kernel`, `ce_kernel2`, `ce_kernel3`, `ce_kernel4`: cross-encoder training and scoring.
+- `ce_fr_kernel*`: French pairs above the band.
+- `ce_ext2_kernel`: scoring of the ext2 pairs.
 
-Models: a cascade of LightGBM binary classifiers (MIT licence) and a fine-tuned cross-encoder
-`xlm-roberta-base` (MIT, 278M parameters). `intfloat/multilingual-e5-small` (MIT, 118M) retrieves candidates and
+Models:
+- A cascade of LightGBM binary classifiers (MIT licence).
+- Fine-tuned cross-encoders: two `xlm-roberta-base` (MIT, 278M parameters) and `microsoft/mdeberta-v3-base` (MIT, 278M). `intfloat/multilingual-e5-small` (MIT, 118M) retrieves candidates and
 gives a similarity feature. All models are MIT-licensed and far below the 8B-parameter limit.
 
 Tests: `python -m pytest tests -q`

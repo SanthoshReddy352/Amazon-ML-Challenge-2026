@@ -1,0 +1,74 @@
+D:\Amazon-ML-Challenge-2026\submissions\_final_code.zip: 78 files
+ML Challenge 2026 — submission validator
+  test dir: dataset/test
+  required S1 entities: 1732544
+  valid S2/S3 match IDs: 9969589
+  matching_results.tsv: 1732544 rows (100587 empty, 1631957 non-empty).
+
+WARNING: output/candidate_pairs.tsv not found — skipping candidate_pairs.tsv checks. It is optional here, but your final submission zip must include output/candidate_pairs.tsv.
+PASS — no blocking issues found. Safe to submit.
+ 
+submissions\Team_Bloom_submission.zip: 81 entries, 1081 MB
+output/matching_results.tsv
+output/candidate_pairs.tsv
+code/business_entity_resolution/README.md
+code/business_entity_resolution/requirements.txt
+code/business_entity_resolution/.pytest_cache/.gitignore
+code/business_entity_resolution/.pytest_cache/CACHEDIR.TAG
+code/business_entity_resolution/.pytest_cache/README.md
+code/business_entity_resolution/.pytest_cache/v/cache/lastfailed
+code/business_entity_resolution/.pytest_cache/v/cache/nodeids
+code/business_entity_resolution/tests/test_decision.py
+code/business_entity_resolution/tests/test_evaluate.py
+code/business_entity_resolution/tests/test_normalize.py
+code/business_entity_resolution/tests/test_stage2.py
+code/business_entity_resolution/pipeline/run_v3.py
+code/business_entity_resolution/pipeline/run_v4.py
+code/business_entity_resolution/pipeline/run_v5.py
+code/business_entity_resolution/pipeline/run_v7.py
+code/business_entity_resolution/pipeline/build_fit3.py
+code/business_entity_resolution/pipeline/ce_export.py
+code/business_entity_resolution/pipeline/ce_export2.py
+code/business_entity_resolution/pipeline/ce_blend.py
+code/business_entity_resolution/pipeline/ce_blend2.py
+code/business_entity_resolution/pipeline/combine_v11.py
+code/business_entity_resolution/pipeline/make_submission.py
+code/business_entity_resolution/pipeline/write_candidates.py
+code/business_entity_resolution/pipeline/make_code_zip.py
+code/business_entity_resolution/pipeline/lbsim.py
+code/business_entity_resolution/pipeline/fr_fit.py
+code/business_entity_resolution/pipeline/run_ext2_block.py
+code/business_entity_resolution/pipeline/run_ext2.py
+code/business_entity_resolution/pipeline/ce_export_ext2.py
+code/business_entity_resolution/pipeline/ext2_blend.py
+code/business_entity_resolution/pipeline/empty_rescue.py
+code/business_entity_resolution/pipeline/final_v13.py
+code/business_entity_resolution/pipeline/run_ext3.py
+code/business_entity_resolution/pipeline/biencoder_export.py
+code/business_entity_resolution/pipeline/make_final_zip.py
+code/business_entity_resolution/pipeline/band_stack.py
+code/business_entity_resolution/pipeline/bfwd_merge.py
+code/business_entity_resolution/kaggle/embed_knn/embed_knn.py
+code/business_entity_resolution/kaggle/embed_knn/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_kernel/ce_fr_score.py
+code/business_entity_resolution/kaggle/ce_kernel/ce_train.py
+code/business_entity_resolution/kaggle/ce_kernel/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_kernel2/ce_train.py
+code/business_entity_resolution/kaggle/ce_kernel2/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_kernel3/ce_train.py
+code/business_entity_resolution/kaggle/ce_kernel3/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_kernel4/ce_train.py
+code/business_entity_resolution/kaggle/ce_kernel4/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_fr_kernel/ce_fr_score.py
+code/business_entity_resolution/kaggle/ce_fr_kernel/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_fr_kernel3/ce_fr_score.py
+code/business_entity_resolution/kaggle/ce_fr_kernel3/kernel-metadata.json
+code/business_entity_resolution/kaggle/ce_ext2_kernel/ce_ext2_score.py
+code/business_entity_resolution/kaggle/ce_ext2_kernel/kernel-metadata.json
+code/business_entity_resolution/kaggle/embed_rknn/embed_rknn.py
+code/business_entity_resolution/kaggle/embed_rknn/kernel-metadata.json
+code/business_entity_resolution/kaggle/biencoder/biencoder.py
+code/business_entity_resolution/kaggle/biencoder/kernel-metadata.json
+code/business_entity_resolution/kaggle/bfwd_kernel/bfwd.py
+code/business_entity_resolution/kaggle/bfwd_kernel/kernel-metadata.json
+Documentation_template.md

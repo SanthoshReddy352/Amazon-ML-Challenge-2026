@@ -1,0 +1,19 @@
+{
+  "id": "santhosh18x/amlc2026-bfwd",
+  "title": "amlc2026-bfwd",
+  "code_file": "bfwd.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "enable_internet": true,
+  "dataset_sources": [
+    "santhosh18x/amlc2026-text2",
+    "santhosh18x/amlc2026-bandkeys"
+  ],
+  "competition_sources": [],
+  "kernel_sources": [
+    "santhosh18x/amlc2026-biencoder"
+  ]
+}

@@ -1,0 +1,52 @@
+val v15 stack (no empty model): F0.5 0.98984 P 0.99817 R 0.97177 US 0.98950 IN 0.99035
+[    19s] val band 235,968 pairs, pos 60,956, 38 features
+[   121s] band AUC pf 0.91381 -> re-scored 0.92558
+val v16 (no empty model): F0.5 0.99076 P 0.99831 R 0.97438 US 0.99034 IN 0.99139
+[   157s] test frame 95,234,538 pairs
+[   172s] test band 968,184 pairs; ce1 coverage 0.910, bk rev coverage 0.676
+val v16 final (+494 empty rescue): F0.5 0.99077 P 0.99823 R 0.97463 US 0.99036 IN 0.99139
+shape: (18, 3)
+┌─────────┬──────┬────────┐
+│ country ┆ kind ┆ len    │
+│ ---     ┆ ---  ┆ ---    │
+│ str     ┆ u8   ┆ u32    │
+╞═════════╪══════╪════════╡
+│ France  ┆ 0    ┆ 838603 │
+│ France  ┆ 1    ┆ 1566   │
+│ France  ┆ 2    ┆ 2387   │
+│ France  ┆ 3    ┆ 455    │
+│ France  ┆ 4    ┆ 725    │
+│ …       ┆ …    ┆ …      │
+│ US      ┆ 1    ┆ 7489   │
+│ US      ┆ 2    ┆ 6730   │
+│ US      ┆ 3    ┆ 611    │
+│ US      ┆ 4    ┆ 1348   │
+│ US      ┆ 5    ┆ 6086   │
+└─────────┴──────┴────────┘
+shape: (3, 6)
+┌─────────┬─────────┬──────────┬────────┬────────┬────────┐
+│ country ┆ pairs   ┆ nonempty ┆ len    ┆ per_s1 ┆ empty  │
+│ ---     ┆ ---     ┆ ---      ┆ ---    ┆ ---    ┆ ---    │
+│ str     ┆ u32     ┆ u32      ┆ u32    ┆ f64    ┆ f64    │
+╞═════════╪═════════╪══════════╪════════╪════════╪════════╡
+│ France  ┆ 849380  ┆ 244431   ┆ 259452 ┆ 3.2737 ┆ 0.0579 │
+│ India   ┆ 2741238 ┆ 763552   ┆ 809986 ┆ 3.3843 ┆ 0.0573 │
+│ US      ┆ 2247601 ┆ 625025   ┆ 663106 ┆ 3.3895 ┆ 0.0574 │
+└─────────┴─────────┴──────────┴────────┴────────┴────────┘
+vs v15: shape: (3, 6)
+┌─────────┬───────┬─────────┬────────┬────────────┬────────────┐
+│ country ┆ added ┆ removed ┆ len    ┆ add_per_1k ┆ rem_per_1k │
+│ ---     ┆ ---   ┆ ---     ┆ ---    ┆ ---        ┆ ---        │
+│ str     ┆ u32   ┆ u32     ┆ u32    ┆ f64        ┆ f64        │
+╞═════════╪═══════╪═════════╪════════╪════════════╪════════════╡
+│ France  ┆ 3910  ┆ 5462    ┆ 259452 ┆ 15.07      ┆ 21.05      │
+│ India   ┆ 9183  ┆ 3210    ┆ 809986 ┆ 11.34      ┆ 3.96       │
+│ US      ┆ 6214  ┆ 2327    ┆ 663106 ┆ 9.37       ┆ 3.51       │
+└─────────┴───────┴─────────┴────────┴────────────┴────────────┘
+[   362s] 5,838,219 pairs -> submissions\v16\matching_results.tsv
+matching_results.tsv: 1732544 rows (99536 empty, 1633008 non-empty).
+
+WARNING: ID-existence check is OFF (the default) — not checking that matched/candidate IDs exist in the test set. Every other rule is still checked. Re-run with --check-ids to enable it (needs test_source2/3.tsv; uses more memory). A nonexistent ID only lowers your score, never rejects your submission.
+WARNING: output/candidate_pairs.tsv not found — skipping candidate_pairs.tsv checks. It is optional here, but your final submission zip must include output/candidate_pairs.tsv.
+PASS — no blocking issues found. Safe to submit.
+ 

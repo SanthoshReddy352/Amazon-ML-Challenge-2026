@@ -1,0 +1,14 @@
+{
+  "id": "santhosh18x/amlc2026-ce-ext2-score",
+  "title": "amlc2026-ce-ext2-score",
+  "code_file": "ce_ext2_score.py",
+  "language": "python",
+  "kernel_type": "script",
+  "is_private": true,
+  "enable_gpu": true,
+  "machine_shape": "NvidiaTeslaT4",
+  "enable_internet": true,
+  "dataset_sources": ["santhosh18x/amlc2026-ce-ext2"],
+  "competition_sources": [],
+  "kernel_sources": ["santhosh18x/amlc2026-cross-encoder", "santhosh18x/amlc2026-cross-encoder2", "santhosh18x/amlc2026-cross-encoder3", "santhosh18x/amlc2026-cross-encoder4"]
+}
